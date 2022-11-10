@@ -1,29 +1,28 @@
 #!/usr/bin/env python3
 
 from collections import Counter
+import math
 from operator import itemgetter
 
 
-def read_wordlist():
-    with open('./wordlist.txt', 'r') as f:
+def read_wordlist(filename):
+    with open(filename, 'r') as f:
         lines = f.readlines()
         return (word.strip() for line in lines for word in line.split(',') if len(word.strip()) > 0)
-            
-def get_letters(words):
-    return ((letter, position) for word in words for position, letter in enumerate(word))
+    
+def get_letter_log_freqs(words, position=None):
+    counts = Counter(
+        letter for word in words for pos, letter in enumerate(word)
+        if pos == position or position == None
+    )
+    log_total = math.log(sum(counts.values()))
+    return {letter: math.log(count) - log_total for letter, count in counts.items()}
+    
 
-def get_letter_counts(letters):
-    overall = Counter(letter[0] for letter in letters)
-    by_position = [
-        Counter(letter[0] for letter in letters if letter[1] == pos)
-        for pos in range(0,5)
-    ]
-    return [overall] + by_position
-
-def print_letter_counts(letter_counts, b=5):
-    def get_sorted_letters(counts):
-        return [letter[0] for letter in sorted(counts.items(), key=itemgetter(1), reverse=True)]
-    def format_letters_in_blocks(letters, join_on=" ", separator="     "):
+def format_letters_by_freq(log_freqs, b=5):    
+    def get_sorted_letters():
+        return [letter for letter, _ in sorted(log_freqs.items(), key=itemgetter(1), reverse=True)]
+    def format_letter_blocks(letters, join_on=" ", separator="     "):
         out = []
         for i in range(0, len(letters), b):
             out.append(join_on.join(letters[slice(i, i+b, 1)]))
@@ -31,26 +30,26 @@ def print_letter_counts(letter_counts, b=5):
             out[4] += join_on + out[5]
             del(out[5])
         return separator.join(out)
-    
-    all_letters = set([*'abcdefghijklmnopqrstuvwxyz'])
-    
-    print("\nLetters sorted by frequency from most to least")
-    print("In any position:        %s" % format_letters_in_blocks(get_sorted_letters(letter_counts[0])))
+    alphabet = set([*'abcdefghijklmnopqrstuvwxyz'])
+    sorted_letters = format_letter_blocks(get_sorted_letters())
+    missing_letters = " ".join(alphabet - set(log_freqs.keys()))
+    missing_letters = f"[ {missing_letters} ]" if len(missing_letters) > 0 else ''
+    return f"{sorted_letters:71} {missing_letters}"
+
+
+def print_letters_by_answer_frequency(answer_letter_freqs):
+    print("\nLetters in answer words, sorted by frequency from most to least")
+    print(f"In any position:     {format_letters_by_freq(answer_letter_freqs[0])}")
     for pos in range(1, 6):
-        sorted_letters = format_letters_in_blocks(get_sorted_letters(letter_counts[pos]))
-        missing_letters = " ".join(all_letters - set(letter_counts[pos].keys()))
-        missing_letters = f"[ {missing_letters} ]" if len(missing_letters) > 0 else ''
-        print(f"Only in position {pos}:     {sorted_letters:71} {missing_letters}")
+        print(f"In position {pos}:       {format_letters_by_freq(answer_letter_freqs[pos])}")
+    
 
 def main():
-    words = list(read_wordlist())
-    letters = list(get_letters(words))
-    letter_counts = get_letter_counts(letters)
-    print_letter_counts(letter_counts)
+    answers = list(read_wordlist('./wordlist_answers.txt'))
+    guesses = list(read_wordlist('./wordlist_guesses.txt')) + answers
+    answer_letter_freqs = [get_letter_log_freqs(answers, pos) for pos in [None, *range(0,5)]]
+    print_letters_by_answer_frequency(answer_letter_freqs)
 
-    # print("%d words" % len(wordlist))
-    # print("%d letters" % len(letters))
-    # print(letter_counts)
 
 if __name__ == "__main__":
     main()
