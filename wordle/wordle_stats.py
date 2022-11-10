@@ -20,12 +20,27 @@ def get_letter_counts(letters):
     ]
     return [overall] + by_position
 
-def print_letter_counts(letter_counts):
+def print_letter_counts(letter_counts, b=5):
     def get_sorted_letters(counts):
         return [letter[0] for letter in sorted(counts.items(), key=itemgetter(1), reverse=True)]
-    print("Overall: %s" % ' '.join(get_sorted_letters(letter_counts[0])))
+    def format_letters_in_blocks(letters, join_on=" ", separator="     "):
+        out = []
+        for i in range(0, len(letters), b):
+            out.append(join_on.join(letters[slice(i, i+b, 1)]))
+        if len(out) == 6:
+            out[4] += join_on + out[5]
+            del(out[5])
+        return separator.join(out)
+    
+    all_letters = set([*'abcdefghijklmnopqrstuvwxyz'])
+    
+    print("\nLetters sorted by frequency from most to least")
+    print("In any position:        %s" % format_letters_in_blocks(get_sorted_letters(letter_counts[0])))
     for pos in range(1, 6):
-        print("Pos %d: %s" % (pos, ' '.join(get_sorted_letters(letter_counts[pos]))))
+        sorted_letters = format_letters_in_blocks(get_sorted_letters(letter_counts[pos]))
+        missing_letters = " ".join(all_letters - set(letter_counts[pos].keys()))
+        missing_letters = f"[ {missing_letters} ]" if len(missing_letters) > 0 else ''
+        print(f"Only in position {pos}:     {sorted_letters:71} {missing_letters}")
 
 def main():
     words = list(read_wordlist())
