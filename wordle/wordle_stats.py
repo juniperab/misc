@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 from collections import Counter, namedtuple
 import math
 from operator import attrgetter, itemgetter
@@ -16,10 +17,45 @@ ANSWERS_WORDLIST_FILE = 'wordlist_answers.txt'
 EXPECTED_GUESS_SCORES_CACHE_FILE = 'expected_guess_scores_cache.txt'
 LEGAL_GUESSES_WORDLIST_FILE = 'wordlist_guesses.txt'
 MAX_DUPLICATE_GUESS_LETTERS = 0
-PLANNED_GUESSES = None
+PLANNED_GUESSES = []
 PRINTING_BLOCK_SIZE = 5
 PRINTING_NUM_WORDS = 15
 WORD_LENGTH = 5
+
+
+def parse_args(argv):
+    global WORD_LENGTH, MAX_DUPLICATE_GUESS_LETTERS, PLANNED_GUESSES
+    parser = argparse.ArgumentParser(
+        prog='wordle_stats',
+        description='compute some basic wordle statistics'
+    )
+    parser.add_argument(
+        '-w', '--word-length',
+        default=WORD_LENGTH,
+        type=int,
+        help="length of answer and guess words (default = 5)",
+    )
+    parser.add_argument(
+        '-d', '--max-duplicates',
+        default=MAX_DUPLICATE_GUESS_LETTERS,
+        type=int,
+        help="maximum duplicate letters in guesses (default = 0)",
+    )
+    planned_guesses_string = "'" + "', '".join(PLANNED_GUESSES or []) + "'"
+    parser.add_argument(
+        'planned_guesses',
+        action='store',
+        type=str,
+        nargs='*',
+        help="possible guesses to evaluate " +
+                (f"(default = {planned_guesses_string})" if PLANNED_GUESSES and len(PLANNED_GUESSES) > 0 else '')
+    )
+    args = parser.parse_args(argv)
+    WORD_LENGTH = args.word_length
+    MAX_DUPLICATE_GUESS_LETTERS = args.max_duplicates
+    PLANNED_GUESSES = args.planned_guesses
+    if PLANNED_GUESSES and len(PLANNED_GUESSES) == 0:
+        PLANNED_GUESSES = None
 
 
 def read_wordlist(filename):
@@ -90,25 +126,27 @@ def get_expected_guess_score(guess_word, answers):
 
 
 def get_all_expected_guess_scores(guesses, answers):
-    filename = 'expected_guess_scores.txt'
+    filename = EXPECTED_GUESS_SCORES_CACHE_FILE
     expected_guess_scores = []
     if os.path.exists(filename):
-        print(f"Loading expected guess scores from {filename} (delete this file to recalculate)")
-        with open('expected_guess_scores.txt', 'r') as f:
+        print(f"Loading expected guess scores from '{filename}' (delete this file to recalculate)")
+        with open(filename, 'r') as f:
             for line in f.readlines():
                 fields = [f.strip() for f in line.split(',')]
                 exp = ScoreExpectation(fields[0], float(fields[1]), float(fields[2]), float(fields[3]))
                 expected_guess_scores.append(exp)
     else:
-        with open('expected_guess_scores.txt', 'w') as out:
-            print("Calculating expected guess scores (saving to {filename})")
+        with open(filename + '~', 'w') as out:
+            print(f"Calculating expected guess scores (saving to '{filename}')")
+            one_percent = int(len(guesses) / 100)
             for idx, guess_word in enumerate(guesses):
-                if idx % 100 == 0:
-                    sys.stdout.write(f"{idx} ")
+                if idx % one_percent == 0:
+                    sys.stdout.write(f"{int(idx / one_percent)}% ")
                     sys.stdout.flush()
-                exp = get_score_expectation(guess_word, answers)
+                exp = get_expected_guess_score(guess_word, answers)
                 out.write(f"{exp.word}, {exp.greens}, {exp.yellows}, {exp.total}\n")
                 expected_guess_scores.append(exp)
+        os.rename(filename + '~', filename)
     return expected_guess_scores
 
 
@@ -140,7 +178,7 @@ def print_letters_by_frequency(answer_letter_freqs):
         return f"{sorted_letters:71} {missing_letters}"
 
     planned_guess_letters = set()
-    if PLANNED_GUESSES != None:
+    if PLANNED_GUESSES:
         for guess in PLANNED_GUESSES:
             for letter in guess:
                 planned_guess_letters.add(letter)
@@ -166,7 +204,7 @@ def print_guesses_with_best_expected_scores(possible_guesses):
     print(f"Most Yellows:        {', '.join(most_yellows[0:PRINTING_NUM_WORDS])}")
     print(f"Most Total Hits:     {', '.join(most_total[0:PRINTING_NUM_WORDS])}")
     
-    if PLANNED_GUESSES != None and len(PLANNED_GUESSES) > 0:
+    if PLANNED_GUESSES:
         previous_guess_letters = set()
         for i in range(0, min(2, len(PLANNED_GUESSES))):
             previous_guess_letters = previous_guess_letters.union(set(PLANNED_GUESSES[i]))
@@ -181,9 +219,10 @@ def print_guesses_with_best_expected_scores(possible_guesses):
 
 
 def main():
-    global PLANNED_GUESSES
-    PLANNED_GUESSES = sys.argv[1:]
-    print(f"Some Wordle Statistics. Planned guesses: {' '.join(PLANNED_GUESSES)}")
+    parse_args(sys.argv[1:])
+    print(f"Some Wordle Statistics.")
+    if PLANNED_GUESSES:
+        print(f"Planned guesses: {' '.join(PLANNED_GUESSES)}")
     
     # load word data
     print("\nLoading word lists")
