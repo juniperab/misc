@@ -62,6 +62,11 @@ def parse_args(argv):
         action='store_true',
         help='do not use coloured output',
     )
+    parser.add_argument(
+        '-O', '--seek-optimal-guesses',
+        action='store_true',
+        help='seek for optimal guesses (using the guess letters provided)',
+    )
     planned_guesses_string = "'" + "', '".join(PLANNED_GUESSES or []) + "'"
     parser.add_argument(
         'planned_guesses',
@@ -221,6 +226,7 @@ def seek_optimal_guesses_within_constraints(expected_guess_scores, allowed_lette
     
     Guesses must use all of the allowed letters, without duplicating letters
     '''
+    do_not_warn = False
     if allowed_letters == '':
         allowed_letters = ALPHABET
         do_not_warn = True
@@ -288,6 +294,8 @@ def seek_optimal_guesses_within_constraints(expected_guess_scores, allowed_lette
                     need_line_break = True
     print('')
     result = best_combo_3 if best_combo_3 is not None else best_combo_2
+    if result is None:
+        return None
     return [r.word for r in result]
 
 
@@ -435,7 +443,7 @@ def main():
     global PLANNED_GUESSES
     args = parse_args(sys.argv[1:])
     print(coloured(f"Wordle Statistics.", 'green', attrs=['bold']))
-    if PLANNED_GUESSES and not PLANNED_GUESSES[0].startswith(':'):
+    if PLANNED_GUESSES and not args.seek_optimal_guesses:
         print(f"Planned guesses: {' '.join(PLANNED_GUESSES)}")
     
     # load word data
@@ -445,16 +453,17 @@ def main():
     guesses = list(read_wordlist(LEGAL_GUESSES_WORDLIST_FILE)) + answers
     expected_guess_scores = get_all_expected_guess_scores(guesses, answers)
     
+    # Try to determine what the optimal guesses would be within the given constraints
+    if args.seek_optimal_guesses:
+        allowed_letters = [letter for word in PLANNED_GUESSES for letter in word] if PLANNED_GUESSES else ALPHABET
+        PLANNED_GUESSES = seek_optimal_guesses_within_constraints(
+                expected_guess_scores,
+                allowed_letters,
+                limit_guesses_to=answers if args.only_guess_answers else None)
+    
     # compute and print statistics about the answer words
     letter_freqs_in_answers = [get_letter_log_freqs(answers, pos) for pos in [None, *range(0, WORD_LENGTH)]]
     print_letters_by_frequency(letter_freqs_in_answers)
-    
-    # Try to determine what the optimal guesses would be within the given constraints
-    if len(PLANNED_GUESSES) == 1 and PLANNED_GUESSES[0].startswith(':'):
-        PLANNED_GUESSES = seek_optimal_guesses_within_constraints(
-                expected_guess_scores,
-                PLANNED_GUESSES[0][1:],
-                limit_guesses_to=answers if args.only_guess_answers else None)
     
     # compute and print statistics about the planned guesses
     print_guesses_with_best_expected_scores(
