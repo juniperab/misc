@@ -7,55 +7,61 @@ import os
 import sys
 
 
-ScoreExpectation = namedtuple('ScoreExpectation', ['guess_word', 'greens', 'yellows', 'total'])
+ScoreExpectation = namedtuple('ScoreExpectation', ['word', 'greens', 'yellows', 'total'])
 
+
+# Global Configuration
+ALPHABET = 'abcdefghijklmnopqrstuvwxyz'
+ANSWERS_WORDLIST_FILE = 'wordlist_answers.txt'
+EXPECTED_GUESS_SCORES_CACHE_FILE = 'expected_guess_scores_cache.txt'
+LEGAL_GUESSES_WORDLIST_FILE = 'wordlist_guesses.txt'
+MAX_DUPLICATE_GUESS_LETTERS = 0
+PLANNED_GUESSES = None
+PRINTING_BLOCK_SIZE = 5
+PRINTING_NUM_WORDS = 15
+WORD_LENGTH = 5
 
 
 def read_wordlist(filename):
+    '''
+    Read words from a file.
+    
+    Blank lines are skipped, and multiple words per line are allowed, separated by commas.
+    Only words of length WORD_LENGTH will be returned. All letters will be converted to lower case.
+    '''
     with open(filename, 'r') as f:
         lines = f.readlines()
-        return (word.strip() for line in lines for word in line.split(',') if len(word.strip()) > 0)
-    
+        return (word.strip().lower() for line in lines for word in line.split(',') if len(word.strip()) == WORD_LENGTH)
+
+
 def get_letter_log_freqs(words, position=None):
+    '''
+    Calculate the log frequency of letters in the list of words,
+        either in any position, or in a specific position within the word.
+    
+    Duplicate words are ignored and will not effect the calculation of letter frequencies.
+    '''
     counts = Counter(
-        letter for word in words for pos, letter in enumerate(word)
+        letter for word in set(words) for pos, letter in enumerate(word)
         if pos == position or position == None
     )
     log_total = math.log(sum(counts.values()))
     return {letter: math.log(count) - log_total for letter, count in counts.items()}
+
+
+def get_specific_guess_score(guess_word, answer_word):
+    '''
+    Calculate the score for a guess word relative to an answer word.
     
-
-def format_letters_by_freq(log_freqs, b=5):    
-    def get_sorted_letters():
-        return [letter for letter, _ in sorted(log_freqs.items(), key=itemgetter(1), reverse=True)]
-    def format_letter_blocks(letters, join_on=" ", separator="     "):
-        out = []
-        for i in range(0, len(letters), b):
-            out.append(join_on.join(letters[slice(i, i+b, 1)]))
-        if len(out) == 6:
-            out[4] += join_on + out[5]
-            del(out[5])
-        return separator.join(out)
-    alphabet = set([*'abcdefghijklmnopqrstuvwxyz'])
-    sorted_letters = format_letter_blocks(get_sorted_letters())
-    missing_letters = " ".join(alphabet - set(log_freqs.keys()))
-    missing_letters = f"[ {missing_letters} ]" if len(missing_letters) > 0 else ''
-    return f"{sorted_letters:71} {missing_letters}"
-
-
-def print_letters_by_answer_frequency(answer_letter_freqs):
-    print("\nLetters in answer words, sorted by frequency from most to least")
-    print(f"In any position:     {format_letters_by_freq(answer_letter_freqs[0])}")
-    for pos in range(1, 6):
-        print(f"In position {pos}:       {format_letters_by_freq(answer_letter_freqs[pos])}")
-
-
-def score_guess(guess_word, answer_word):
+    A score consists of the number of green tiles, the number of yellow tiles,
+    and the total number of green and yellow tiles that the guess would receive
+    (independent of position).
+    '''
     guess_word = list(guess_word)
     answer_word = list(answer_word)
-    result = ['.'] * 5
+    result = ['.'] * WORD_LENGTH
     # first pass, look for greens
-    for i in range(0, 5):
+    for i in range(0, WORD_LENGTH):
         if guess_word[i] == answer_word[i]:
             result[i] = 'G'
             guess_word[i] = None
@@ -63,27 +69,31 @@ def score_guess(guess_word, answer_word):
     # second pass, look for yellows
     answer_letter_counts = Counter(answer_word)
     del(answer_letter_counts[None])
-    for i in range(0, 5):
+    for i in range(0, WORD_LENGTH):
         if answer_letter_counts[guess_word[i]] > 0:
             answer_letter_counts[guess_word[i]] -= 1
             result[i] = 'y'
     return ''.join(result)
 
 
-def get_score_expectation(guess_word, answers):
+def get_expected_guess_score(guess_word, answers):
+    '''
+    Calculate the expected score of a guess word relative to all the possible answer words.
+    '''
     greens = 0
     yellows = 0
     for answer_word in answers:
-        score = Counter(score_guess(guess_word, answer_word))
+        score = Counter(get_specific_guess_score(guess_word, answer_word))
         greens += score['G']
         yellows += score['y']
     return ScoreExpectation(guess_word, greens / len(answers), yellows / len(answers), (greens + yellows) / len(answers))
 
 
-def get_all_score_expectations(guesses, answers):
+def get_all_expected_guess_scores(guesses, answers):
+    filename = 'expected_guess_scores.txt'
     expected_guess_scores = []
-    if os.path.exists('expected_guess_scores.txt'):
-        print("\nLoading expected guess scores")
+    if os.path.exists(filename):
+        print(f"Loading expected guess scores from {filename} (delete this file to recalculate)")
         with open('expected_guess_scores.txt', 'r') as f:
             for line in f.readlines():
                 fields = [f.strip() for f in line.split(',')]
@@ -91,63 +101,100 @@ def get_all_score_expectations(guesses, answers):
                 expected_guess_scores.append(exp)
     else:
         with open('expected_guess_scores.txt', 'w') as out:
-            print("\nCalculating expected guess scores")
+            print("Calculating expected guess scores (saving to {filename})")
             for idx, guess_word in enumerate(guesses):
                 if idx % 100 == 0:
                     sys.stdout.write(f"{idx} ")
                     sys.stdout.flush()
                 exp = get_score_expectation(guess_word, answers)
-                out.write(f"{exp.guess_word}, {exp.greens}, {exp.yellows}, {exp.total}\n")
+                out.write(f"{exp.word}, {exp.greens}, {exp.yellows}, {exp.total}\n")
                 expected_guess_scores.append(exp)
     return expected_guess_scores
 
 
-def print_best_score_expectations(score_expectations):
-    print("\nTop scoring initial guesses:")
-    most_greens = [guess.guess_word for guess in sorted(score_expectations, key=attrgetter('greens'), reverse=True)]
-    most_yellows = [guess.guess_word for guess in sorted(score_expectations, key=attrgetter('yellows'), reverse=True)]
-    most_total = [guess.guess_word for guess in sorted(score_expectations, key=attrgetter('total'), reverse=True)]
-    print(f"Most Greens:         {', '.join(most_greens[0:15])}")
-    print(f"Most Yellows:        {', '.join(most_yellows[0:15])}")
-    print(f"Most Total Hits:     {', '.join(most_total[0:15])}")
+def print_letters_by_frequency(answer_letter_freqs):
+    '''
+    ...
+    '''
+    def format_letters_by_frequency(log_freqs, highlight_letters=set(), join_on=" ", block_separator="     "):
+        '''
+        Format letters into sorted blocks (for display) ordered by frequency, with some letters highlighted.
     
-    first_word = 'orate'
-    first_word_letters = set(first_word)
-    most_greens_2 = [word for word in most_greens if len(first_word_letters.intersection(set(word))) == 0]
-    most_yellows_2 = [word for word in most_yellows if len(first_word_letters.intersection(set(word))) == 0]
-    most_total_2 = [word for word in most_total if len(first_word_letters.intersection(set(word))) == 0]
-    print(f"\nSecond guess, after '{first_word}'")
-    print(f"Most Greens 2:       {', '.join(most_greens_2[0:15])}")
-    print(f"Most Yellows 2:      {', '.join(most_yellows_2[0:15])}")
-    print(f"Most Total Hits 2:   {', '.join(most_total_2[0:15])}")
+        Highlighted letters are printed in upper case, while non-highlighted letters are printed in lowercase.
+        '''
+        def get_sorted_letters():
+            sorted_letters = [letter for letter, _ in sorted(log_freqs.items(), key=itemgetter(1), reverse=True)]
+            return [letter.upper() if letter in highlight_letters else letter.lower() for letter in sorted_letters]
+        def format_letter_blocks(letters):
+            out = []
+            for i in range(0, len(letters), PRINTING_BLOCK_SIZE):
+                out.append(join_on.join(letters[slice(i, i + PRINTING_BLOCK_SIZE, 1)]))
+            if len(out) == PRINTING_BLOCK_SIZE + 1:
+                out[PRINTING_BLOCK_SIZE - 1] += join_on + out[PRINTING_BLOCK_SIZE]
+                del(out[PRINTING_BLOCK_SIZE])
+            return block_separator.join(out)
+        alphabet = set([*ALPHABET])
+        sorted_letters = format_letter_blocks(get_sorted_letters())
+        missing_letters = " ".join(alphabet - set(log_freqs.keys()))
+        missing_letters = f"[ {missing_letters} ]" if len(missing_letters) > 0 else ''
+        return f"{sorted_letters:71} {missing_letters}"
+
+    planned_guess_letters = set()
+    if PLANNED_GUESSES != None:
+        for guess in PLANNED_GUESSES:
+            for letter in guess:
+                planned_guess_letters.add(letter)
+    print("\nLetters in answer words, sorted by frequency from most to least (letters in planned guesses are capitalized)")
+    formatted_letters = format_letters_by_frequency(answer_letter_freqs[0], highlight_letters=planned_guess_letters)
+    print(f"In any position:     {formatted_letters}")
+    for pos in range(1, 6):
+        formatted_letters_by_freq = format_letters_by_frequency(
+                answer_letter_freqs[pos], highlight_letters=planned_guess_letters)
+        print(f"In position {pos}:       {formatted_letters}")
 
 
-    second_word = 'sling'
-    second_word_letters = set(first_word).union(set(second_word))
-    most_greens_3 = [word for word in most_greens if len(second_word_letters.intersection(set(word))) == 0]
-    most_yellows_3 = [word for word in most_yellows if len(second_word_letters.intersection(set(word))) == 0]
-    most_total_3 = [word for word in most_total if len(second_word_letters.intersection(set(word))) == 0]
-    print(f"\nThird guess, after '{first_word}' and '{second_word}'")
-    print(f"Most Greens 3:       {', '.join(most_greens_3[0:15])}")
-    print(f"Most Yellows 3:      {', '.join(most_yellows_3[0:15])}")
-    print(f"Most Total Hits 3:   {', '.join(most_total_3[0:15])}")
+def print_guesses_with_best_expected_scores(possible_guesses):
+    print("")
+    # only consider guesses that do not include duplicated letters
+    possible_guesses = [guess for guess in possible_guesses if len(set(guess.word)) == WORD_LENGTH]
     
+    print("Top scoring initial guesses:")
+    most_greens = [guess.word for guess in sorted(possible_guesses, key=attrgetter('greens'), reverse=True)]
+    most_yellows = [guess.word for guess in sorted(possible_guesses, key=attrgetter('yellows'), reverse=True)]
+    most_total = [guess.word for guess in sorted(possible_guesses, key=attrgetter('total'), reverse=True)]
+    print(f"Most Greens:         ({'score'}) {', '.join(most_greens[0:PRINTING_NUM_WORDS])}")
+    print(f"Most Yellows:        {', '.join(most_yellows[0:PRINTING_NUM_WORDS])}")
+    print(f"Most Total Hits:     {', '.join(most_total[0:PRINTING_NUM_WORDS])}")
     
+    if PLANNED_GUESSES != None and len(PLANNED_GUESSES) > 0:
+        previous_guess_letters = set()
+        for i in range(0, min(2, len(PLANNED_GUESSES))):
+            previous_guess_letters = previous_guess_letters.union(set(PLANNED_GUESSES[i]))
+            most_greens_2 = [word for word in most_greens if len(previous_guess_letters.intersection(set(word))) == 0]
+            most_yellows_2 = [word for word in most_yellows if len(previous_guess_letters.intersection(set(word))) == 0]
+            most_total_2 = [word for word in most_total if len(previous_guess_letters.intersection(set(word))) == 0]
+            formatted_planned_guesses = "' and '".join(PLANNED_GUESSES[0:i+1])
+            print(f"\nTop scoring guesses after '{formatted_planned_guesses}'")
+            print(f"Most Greens:         {', '.join(most_greens_2[0:PRINTING_NUM_WORDS])}")
+            print(f"Most Yellows:        {', '.join(most_yellows_2[0:PRINTING_NUM_WORDS])}")
+            print(f"Most Total Hits:     {', '.join(most_total_2[0:PRINTING_NUM_WORDS])}")
+
 
 def main():
-    answers = list(read_wordlist('wordlist_answers.txt'))
-    guesses = list(read_wordlist('wordlist_guesses.txt')) + answers
-    answer_letter_freqs = [get_letter_log_freqs(answers, pos) for pos in [None, *range(0,5)]]
-    print_letters_by_answer_frequency(answer_letter_freqs)
+    global PLANNED_GUESSES
+    PLANNED_GUESSES = sys.argv[1:]
+    print(f"Some Wordle Statistics. Planned guesses: {' '.join(PLANNED_GUESSES)}")
     
+    # load word data
+    print("\nLoading word lists")
+    answers = list(read_wordlist(ANSWERS_WORDLIST_FILE))
+    guesses = list(read_wordlist(LEGAL_GUESSES_WORDLIST_FILE)) + answers
+    expected_guess_scores = get_all_expected_guess_scores(guesses, answers)
     
-    score_expectations = get_all_score_expectations(guesses, answers)
-    print_best_score_expectations(score_expectations)
-    
-    # expected_guess_scores = [get_score_expectation(guess_word, answers) for guess_word in guesses[0:10]]
-    # guess = expected_guess_scores[2]
-    # print(f"{guess.guess_word}, {guess.greens}, {guess.yellows}, {guess.total}")
-    # # print_best_score_expectations(score_expectations)
+    # compute and print statistics
+    letter_freqs_in_answers = [get_letter_log_freqs(answers, pos) for pos in [None, *range(0, WORD_LENGTH)]]
+    print_letters_by_frequency(letter_freqs_in_answers)
+    print_guesses_with_best_expected_scores(expected_guess_scores)
     
 
 if __name__ == "__main__":
