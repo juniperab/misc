@@ -188,6 +188,25 @@ def get_all_expected_guess_scores(guesses, answers):
     return expected_guess_scores
 
 
+def get_weighted_score(guess):
+    return guess.greens * GREEN_MULTIPLIER + guess.yellows
+
+
+def get_ideal_weighted_guess_scores(expected_guess_scores):
+    letters_used = set()
+    best_guesses = []
+    while True:
+        top_scores = sorted(
+                (guess for guess in expected_guess_scores if len(set(guess.word).intersection(letters_used)) == 0),
+                key=get_weighted_score, reverse=True)
+        if len(top_scores) == 0:
+            break
+        best_guesses.append(top_scores[0])
+        for letter in top_scores[0].word:
+            letters_used.add(letter)
+    return best_guesses
+
+
 def print_letters_by_frequency(answer_letter_freqs):
     '''
     Display the letters of the alphabet, sorted by frequency of occurrence.
@@ -248,21 +267,19 @@ def print_guesses_with_best_expected_scores(expected_guess_scores, answers, limi
     As well, the best guesses are displayed based on a weighted score
     where each green is counted as more than one yellow.
     '''
-    def get_weighted_score(guess):
-        return guess.greens * GREEN_MULTIPLIER + guess.yellows
-    
-    def format_score_summary(*guesses):
+    def format_score_summary(*guesses, ideal_weighted_score=None):
         w = sum(get_weighted_score(guess) for guess in guesses)
         g = sum(guess.greens for guess in guesses)
         y = sum(guess.yellows for guess in guesses)
         t = sum(guess.total for guess in guesses)
-        return coloured(f"{w:0.2f}", 'blue', attrs=['bold']) + " | " + \
+        weighted_score_diff = f" {w - ideal_weighted_score:0.2f}" if ideal_weighted_score else ''
+        return coloured(f"{w:0.2f}{weighted_score_diff}", 'blue', attrs=['bold']) + " | " + \
                 coloured(f"{g:0.2f}", 'green') + " + " + \
                 coloured(f"{y:0.2f}", 'yellow') + " = " + \
                 coloured(f"{t:0.2f}", 'cyan')
     
-    def format_planned_guesses(planned_guesses):
-        formatted_planned_guesses = "' and '".join(PLANNED_GUESSES[0:i+1])
+    # def format_planned_guesses(planned_guesses, count):
+    #     formatted_planned_guesses = "' and '".join(PLANNED_GUESSES[0:count+1])
     
     print("")
     # only consider guesses that do not include too many duplicated letters
@@ -275,7 +292,10 @@ def print_guesses_with_best_expected_scores(expected_guess_scores, answers, limi
     legal_guess_set = set(guess.word for guess in expected_guess_scores)
     print(f"Considering {len(possible_guesses)} possible guesses out of {len(legal_guess_set)} legal guesses")
     
-    print(coloured("Top scoring initial guesses:", attrs=['bold']))
+    ideal_guesses = get_ideal_weighted_guess_scores(expected_guess_scores)
+    print("Statistically ideal guesses are: '" + "' and '".join(g.word for g in ideal_guesses) + "'")
+    
+    print(coloured("\nTop scoring initial guesses:", attrs=['bold']))
     most_greens = [guess for guess in sorted(possible_guesses, key=attrgetter('greens'), reverse=True)]
     most_yellows = [guess for guess in sorted(possible_guesses, key=attrgetter('yellows'), reverse=True)]
     most_total = [guess for guess in sorted(possible_guesses, key=attrgetter('total'), reverse=True)]
@@ -294,6 +314,8 @@ def print_guesses_with_best_expected_scores(expected_guess_scores, answers, limi
         planned_guess_scores = [get_expected_guess_score(guess, answers) for guess in PLANNED_GUESSES]
         previous_guess_letters = set()
         for i in range(0, len(PLANNED_GUESSES)):
+            ideal_weighted_score = sum(get_weighted_score(guess) for guess in ideal_guesses[0:i+1])
+            print(ideal_weighted_score)
             next_guess = PLANNED_GUESSES[i]
             previous_guess_letters = previous_guess_letters.union(set(PLANNED_GUESSES[i]))
             most_greens_2 = [guess for guess in most_greens
@@ -305,8 +327,8 @@ def print_guesses_with_best_expected_scores(expected_guess_scores, answers, limi
             top_weighted_2 = [guess for guess in top_weighted
                     if len(previous_guess_letters.intersection(set(guess.word))) == 0]
             formatted_planned_guesses = "' and '".join(PLANNED_GUESSES[0:i+1])
-            print(coloured(f"\nTop scoring guesses after '{formatted_planned_guesses}'     " + \
-                    f"({format_score_summary(*planned_guess_scores[0:i+1])}):", attrs=['bold']))
+            print(coloured(f"\nTop scoring guesses after '{formatted_planned_guesses}'     ", attrs=['bold']) + \
+                    f"({format_score_summary(*planned_guess_scores[0:i+1], ideal_weighted_score=ideal_weighted_score)}):")
             if len(top_weighted_2) == 0:
                 print(coloured("No legal guesses remain that meet the chosen criteria", 'red'))
                 break
