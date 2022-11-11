@@ -3,6 +3,7 @@
 import argparse
 from collections import Counter, namedtuple
 import colorama
+from itertools import combinations
 import math
 from operator import attrgetter, itemgetter
 import os
@@ -10,7 +11,7 @@ import sys
 import termcolor
 
 
-ScoreExpectation = namedtuple('ScoreExpectation', ['word', 'greens', 'yellows', 'total'])
+ExpectedScore = namedtuple('ExpectedScore', ['word', 'greens', 'yellows', 'total'])
 
 
 # Global Configuration
@@ -154,7 +155,7 @@ def get_expected_guess_score(guess_word, answers):
         score = Counter(get_specific_guess_score(guess_word, answer_word))
         greens += score['G']
         yellows += score['y']
-    return ScoreExpectation(guess_word, greens / len(answers), yellows / len(answers), (greens + yellows) / len(answers))
+    return ExpectedScore(guess_word, greens / len(answers), yellows / len(answers), (greens + yellows) / len(answers))
 
 
 def get_all_expected_guess_scores(guesses, answers):
@@ -171,7 +172,7 @@ def get_all_expected_guess_scores(guesses, answers):
         with open(filename, 'r') as f:
             for line in f.readlines():
                 fields = [f.strip() for f in line.split(',')]
-                exp = ScoreExpectation(fields[0], float(fields[1]), float(fields[2]), float(fields[3]))
+                exp = ExpectedScore(fields[0], float(fields[1]), float(fields[2]), float(fields[3]))
                 expected_guess_scores.append(exp)
     else:
         with open(filename + '~', 'w') as out:
@@ -189,10 +190,17 @@ def get_all_expected_guess_scores(guesses, answers):
 
 
 def get_weighted_score(guess):
+    '''
+    Calculate the weighted score for a guess (given it's expected green and yellow scores).
+    '''
     return guess.greens * GREEN_MULTIPLIER + guess.yellows
 
 
 def get_ideal_weighted_guess_scores(expected_guess_scores):
+    '''
+    Calculate the sequence of 'ideal' guesses that maximize the total weighted score at each step
+    and do not repeat letters from previous guesses. All legal guesses are considered.
+    '''
     letters_used = set()
     best_guesses = []
     while True:
@@ -205,6 +213,82 @@ def get_ideal_weighted_guess_scores(expected_guess_scores):
         for letter in top_scores[0].word:
             letters_used.add(letter)
     return best_guesses
+    
+
+def seek_optimal_guesses_within_constraints(expected_guess_scores, allowed_letters, limit_guesses_to=None):
+    '''
+    Try to determine what the optimal guesses would be within the given constraints.
+    
+    Guesses must use all of the allowed letters, without duplicating letters
+    '''
+    if allowed_letters == '':
+        allowed_letters = ALPHABET
+        do_not_warn = True
+    allowed_letters = set(allowed_letters)
+    print(coloured(f"\nSeeking optimal guesses using letters " + \
+            f"{' '.join(l.upper() for l in sorted(allowed_letters))}", attrs=['bold']))
+    if len(allowed_letters) % WORD_LENGTH != 0 and not do_not_warn:
+        print(coloured(
+                "WARNING: The set of allowed letters is not evenly divisible by the word length",
+                'red', attrs=['bold']))
+    num_guesses = int(len(allowed_letters) / WORD_LENGTH)
+
+    # filter possible guesses to include only words that use only the required letters and have no duplicates
+    possible_guesses = expected_guess_scores
+    if limit_guesses_to:
+        limit_guesses_to = set(limit_guesses_to)
+        possible_guesses = [guess for guess in possible_guesses if guess.word in limit_guesses_to]
+    possible_guesses = [guess for guess in possible_guesses
+            if len(allowed_letters.intersection(set(guess.word))) == WORD_LENGTH]
+    possible_guesses = sorted(possible_guesses, key=get_weighted_score, reverse=True)
+    possible_guesses = [(set(g.word), g) for g in possible_guesses] # precompute letter sets for each guess
+    print(f"Considering {len(possible_guesses)} possible guesses")
+
+    best_combo_2 = None
+    best_score_2 = 0
+    letters_used_2 = set()
+    best_combo_3 = None
+    best_score_3 = 0
+    letters_used_3 = set()
+    need_line_break = False
+    for idx, guess_data_1 in enumerate(possible_guesses):
+        set1, guess1 = guess_data_1
+        if idx % 10 == 0:
+            if need_line_break:
+                need_line_break = False
+                sys.stdout.write("\n")
+            sys.stdout.write(f"{(100 * idx / len(possible_guesses)):0.2f}% ")
+            sys.stdout.flush()
+        weighted_score_1 = get_weighted_score(guess1)
+        for set2, guess2 in possible_guesses:
+            if len(set1.intersection(set2)) > 0:
+                continue
+            weighted_score_2 = get_weighted_score(guess2)
+            total_weighted_score_2 = weighted_score_1 + weighted_score_2
+            if total_weighted_score_2 > best_score_2:
+                best_combo_2 = (guess1, guess2)
+                best_score_2 = total_weighted_score_2
+                sys.stdout.write(coloured(f"\n{' '.join(g.word for g in best_combo_2)}: " + \
+                        f"{total_weighted_score_2:0.6f}", attrs=['bold']))
+                sys.stdout.flush()
+                need_line_break = True
+            
+            set12 = set1.union(set2)
+            for set3, guess3 in possible_guesses:
+                if len(set12.intersection(set3)) > 0:
+                    continue
+                weighted_score_3 = get_weighted_score(guess3)
+                total_weighted_score_3 = weighted_score_1 + weighted_score_2 + weighted_score_3
+                if total_weighted_score_3 > best_score_3:
+                    best_combo_3 = (guess1, guess2, guess3)
+                    best_score_3 = total_weighted_score_3
+                    sys.stdout.write(coloured(f"\n{' '.join(g.word for g in best_combo_3)}: " + \
+                            f"{total_weighted_score_2:0.6f} -> {total_weighted_score_3:0.6f}", attrs=['bold']))
+                    sys.stdout.flush()
+                    need_line_break = True
+    print('')
+    result = best_combo_3 if best_combo_3 is not None else best_combo_2
+    return [r.word for r in result]
 
 
 def print_letters_by_frequency(answer_letter_freqs):
@@ -236,7 +320,7 @@ def print_letters_by_frequency(answer_letter_freqs):
                 out[PRINTING_BLOCK_SIZE - 1] += join_on + out[PRINTING_BLOCK_SIZE]
                 del(out[PRINTING_BLOCK_SIZE])
             return block_separator.join(out)
-        alphabet = set([*ALPHABET])
+        alphabet = set(ALPHABET)
         sorted_letters = format_letter_blocks(get_sorted_letters())
         missing_letters = " ".join(alphabet - set(log_freqs.keys()))
         missing_letters = coloured(f"[ {missing_letters} ]" if len(missing_letters) > 0 else '', 'red')
@@ -328,7 +412,7 @@ def print_guesses_with_best_expected_scores(expected_guess_scores, answers, limi
                     if len(previous_guess_letters.intersection(set(guess.word))) == 0]
             formatted_planned_guesses = "' and '".join(PLANNED_GUESSES[0:i+1])
             print(coloured(f"\nTop scoring guesses after '{formatted_planned_guesses}'     ", attrs=['bold']) + \
-                    f"({format_score_summary(*planned_guess_scores[0:i+1], ideal_weighted_score=ideal_weighted_score)}):")
+                    format_score_summary(*planned_guess_scores[0:i+1], ideal_weighted_score=ideal_weighted_score) + ":")
             if len(top_weighted_2) == 0:
                 print(coloured("No legal guesses remain that meet the chosen criteria", 'red'))
                 break
@@ -348,9 +432,10 @@ def print_guesses_with_best_expected_scores(expected_guess_scores, answers, limi
 
 
 def main():
+    global PLANNED_GUESSES
     args = parse_args(sys.argv[1:])
     print(coloured(f"Wordle Statistics.", 'green', attrs=['bold']))
-    if PLANNED_GUESSES:
+    if PLANNED_GUESSES and not PLANNED_GUESSES[0].startswith(':'):
         print(f"Planned guesses: {' '.join(PLANNED_GUESSES)}")
     
     # load word data
@@ -360,9 +445,18 @@ def main():
     guesses = list(read_wordlist(LEGAL_GUESSES_WORDLIST_FILE)) + answers
     expected_guess_scores = get_all_expected_guess_scores(guesses, answers)
     
-    # compute and print statistics
+    # compute and print statistics about the answer words
     letter_freqs_in_answers = [get_letter_log_freqs(answers, pos) for pos in [None, *range(0, WORD_LENGTH)]]
     print_letters_by_frequency(letter_freqs_in_answers)
+    
+    # Try to determine what the optimal guesses would be within the given constraints
+    if len(PLANNED_GUESSES) == 1 and PLANNED_GUESSES[0].startswith(':'):
+        PLANNED_GUESSES = seek_optimal_guesses_within_constraints(
+                expected_guess_scores,
+                PLANNED_GUESSES[0][1:],
+                limit_guesses_to=answers if args.only_guess_answers else None)
+    
+    # compute and print statistics about the planned guesses
     print_guesses_with_best_expected_scores(
             expected_guess_scores,
             answers,
