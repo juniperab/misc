@@ -286,13 +286,14 @@ def print_guesses_with_best_expected_scores(expected_guess_scores, answers, limi
             f"{', '.join(g.word for g in most_yellows[0:PRINTING_NUM_WORDS])}")
     print(f"Most Total Hits:         ({format_score_summary(most_total[0])}) " + \
             f"{', '.join(g.word for g in most_total[0:PRINTING_NUM_WORDS])}")
-    print(f"Best Weighted Score:     ({format_score_summary(top_weighted[0])}) " + \
-            f"{', '.join(g.word for g in top_weighted[0:PRINTING_NUM_WORDS])}")
+    print(coloured(f"Best Weighted Score:", attrs=['underline']) + \
+            f"     ({format_score_summary(top_weighted[0])}) " + \
+            f"{', '.join(coloured(g.word, attrs=['underline']) for g in top_weighted[0:PRINTING_NUM_WORDS])}")
     
     if PLANNED_GUESSES:
         planned_guess_scores = [get_expected_guess_score(guess, answers) for guess in PLANNED_GUESSES]
         previous_guess_letters = set()
-        for i in range(0, min(2, len(PLANNED_GUESSES))):
+        for i in range(0, len(PLANNED_GUESSES)):
             next_guess = PLANNED_GUESSES[i]
             previous_guess_letters = previous_guess_letters.union(set(PLANNED_GUESSES[i]))
             most_greens_2 = [guess for guess in most_greens
@@ -306,6 +307,9 @@ def print_guesses_with_best_expected_scores(expected_guess_scores, answers, limi
             formatted_planned_guesses = "' and '".join(PLANNED_GUESSES[0:i+1])
             print(coloured(f"\nTop scoring guesses after '{formatted_planned_guesses}'     " + \
                     f"({format_score_summary(*planned_guess_scores[0:i+1])}):", attrs=['bold']))
+            if len(top_weighted_2) == 0:
+                print(coloured("No legal guesses remain that meet the chosen criteria", 'red'))
+                break
             if not next_guess in legal_guess_set:
                 print(coloured(
                         f"WARNING: planned guess '{next_guess}' is not in the set of legal guesses",
@@ -316,8 +320,9 @@ def print_guesses_with_best_expected_scores(expected_guess_scores, answers, limi
                     f"{', '.join(g.word for g in most_yellows_2[0:PRINTING_NUM_WORDS])}")
             print(f"Most Total Hits:         ({format_score_summary(most_total_2[0])}) " + \
                     f"{', '.join(g.word for g in most_total_2[0:PRINTING_NUM_WORDS])}")
-            print(f"Best Weighted Score:     ({format_score_summary(top_weighted_2[0])}) " + \
-                    f"{', '.join(g.word for g in top_weighted_2[0:PRINTING_NUM_WORDS])}")
+            print(coloured(f"Best Weighted Score:", attrs=['underline']) + \
+                    f"     ({format_score_summary(top_weighted_2[0])}) " + \
+                    f"{', '.join(coloured(g.word, attrs=['underline']) for g in top_weighted_2[0:PRINTING_NUM_WORDS])}")
 
 
 def main():
